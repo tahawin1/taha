@@ -1,128 +1,76 @@
 pipeline {
     agent any
-    environment {
-        SONARQUBE_INSTALLATION = 'sonarQube' 
-        ZAP_IMAGE = 'ghcr.io/zaproxy/zaproxy:stable'  // Image Docker d'OWASP ZAP
-      TARGET_URL = 'http://demo.testfire.net'
- // L'URL de l'application à scanner
-    }
+    
     stages {
         stage('Checkout') {
             steps {
-                echo "Clonage du dépôt..."
-                git 'https://github.com/tahawin1/demo-app'
+                echo 'Récupération du code source...'
+                // Si vous utilisez Git
+                git branch: 'main', url: 'https://github.com/votre-user/votre-repo.git'
+                // Ou si le code est déjà sur le serveur Jenkins
+                // checkout scm
             }
         }
-        stage('Analyse SonarQube') {
+        
+        stage('Build') {
             steps {
-                withSonarQubeEnv("${SONARQUBE_INSTALLATION}") {
-                    sh '''
-                    /opt/sonar-scanner/bin/sonar-scanner \
-                      -Dsonar.projectKey=demo-app \
-                      -Dsonar.projectName='Demo App' \
-                      -Dsonar.sources=. \
-                      -Dsonar.host.url=${SONAR_HOST_URL} \
-                      -Dsonar.login=${SONAR_AUTH_TOKEN}
-                    '''
+                echo 'Compilation du projet...'
+                // Pour un projet Maven
+                sh 'mvn clean compile'
+                // Pour un projet Gradle
+                // sh './gradlew build'
+                // Pour un projet Node.js
+                // sh 'npm install && npm run build'
+            }
+        }
+        
+        stage('Tests') {
+            steps {
+                echo 'Exécution des tests...'
+                // Pour Maven
+                sh 'mvn test'
+                // Pour Gradle
+                // sh './gradlew test'
+                // Pour Node.js
+                // sh 'npm test'
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                echo 'Analyse SonarQube...'
+                withSonarQubeEnv('SonarQube-Server') {
+                    // Pour Maven
+                    sh 'mvn sonar:sonar'
+                    // Pour Gradle
+                    // sh './gradlew sonarqube'
+                    // Pour autres projets avec sonar-scanner
+                    // sh 'sonar-scanner'
                 }
             }
         }
-        // ➕ Étape SCA - Analyse des dépendances avec Trivy
-        stage('Analyse SCA - Dépendances') {
+        
+        stage('Quality Gate') {
             steps {
-                echo 'Analyse des dépendances (SCA) avec Trivy...'
-                sh '''
-                trivy fs --scanners vuln,license . > trivy-sca-report.txt
-                cat trivy-sca-report.txt
-                '''
-            }
-        }
-        stage('Build Docker Image') {
-            steps {
-                echo 'Construction de l\'image Docker...'
-                sh 'docker build -t demo-app:latest .'
-            }
-        }
-        stage('Trivy Scan') {
-            steps {
-                echo 'Scan de l\'image Docker avec Trivy...'
-                sh '''
-                trivy image --severity HIGH,CRITICAL demo-app:latest > trivy-image-report.txt
-                cat trivy-image-report.txt
-                '''
-            }
-        }
-        // Vérification de l'image Docker OWASP ZAP
-        stage('Vérification Image ZAP') {
-            steps {
-                echo 'Vérification de l\'image OWASP ZAP...'
-                sh """
-                # Tentative de téléchargement explicite de l'image ZAP
-                docker pull ${ZAP_IMAGE} || echo "AVERTISSEMENT: Impossible de télécharger l'image ZAP"
-                """
-            }
-        }
-        // Étape DAST modifiée - OWASP ZAP
-        stage('Scan OWASP ZAP (DAST)') {
-            steps {
-                echo 'Scan dynamique de l\'application avec OWASP ZAP...'
-                sh """
-                # Utilisation du réseau host pour accéder à localhost
-                docker run --network=host -v \$(pwd):/zap/wrk/:rw ${ZAP_IMAGE} zap-baseline.py -t ${TARGET_URL} -r zap-report1.html -I
-                """
-            }
-            // Permettre à l'étape de continuer même si ZAP trouve des alertes
-            // Les alertes ZAP ne devraient pas nécessairement faire échouer le build
-            post {
-                failure {
-                    echo 'Le scan ZAP a rencontré des problèmes mais nous continuons le pipeline'
-                    script {
-                        currentBuild.result = 'UNSTABLE'
-                    }
-                }
-            }
-        }
-        // Étape d'analyse des résultats ZAP modifiée
-        stage('Analyse des résultats ZAP') {
-            steps {
-                echo 'Analyse des résultats OWASP ZAP...'
-                sh '''
-                # Vérification de l'existence du rapport
-                if [ -f "zap-report1.html" ]; then
-                    echo "Rapport ZAP généré avec succès"
-                    
-                    # Vous pouvez ajouter ici un script pour analyser le contenu du rapport
-                    # Par exemple, chercher des vulnérabilités de haute gravité
-                    if grep -q "High" zap-report1.html; then
-                        echo "ATTENTION: Des vulnérabilités de haute gravité ont été détectées!"
-                    fi
-                else
-                    echo "Rapport ZAP non trouvé - l'étape précédente a probablement échoué"
-                    # Ne pas faire échouer le build ici pour permettre la continuité du pipeline
-                    # mais marquer comme instable
-                fi
-                '''
-            }
-            // On ne fait pas échouer le build directement, on le marque comme instable
-            post {
-                failure {
-                    echo 'Analyse des résultats ZAP incomplète mais nous continuons le pipeline'
-                    script {
-                        currentBuild.result = 'UNSTABLE'
-                    }
+                echo 'Vérification Quality Gate...'
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
     }
+    
     post {
         success {
-            echo '✅ Analyse SonarQube, SCA, scan de conteneur, et DAST réussis.'
-        }
-        unstable {
-            echo '⚠ Pipeline terminé mais certaines étapes sont instables. Vérifiez les rapports.'
+            echo 'Pipeline exécuté avec succès!'
         }
         failure {
-            echo '❌ Échec d\'une des étapes de sécurité.'
+            echo 'Le pipeline a échoué.'
+        }
+        always {
+            echo 'Nettoyage...'
+            // Archiver les résultats si nécessaire
+            // archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
         }
     }
 }
