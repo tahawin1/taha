@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 /* ------------------------------------------------------------------ *
@@ -960,5 +961,10 @@ window.setCam = (px, py, h, tx, ty, th, fov = 40, lift = 1) => {
   roofGrp.position.y = lift * 22; roofGrp.visible = !lift; overlay(50); capEl.style.opacity = 0; fadeEl.style.opacity = 0; titleEl.style.opacity = 0;
   const inside = false; hemi.intensity = .55; camLight.intensity = 0; pool.forEach(p => p.intensity = 0); renderer.render(scene, camera);
 };
+window.exportGLB = () => new Promise(res => {
+  const root = new THREE.Group(); const names = new Map(Object.entries(M).map(([k, v]) => [v, k]));
+  scene.traverse(o => { if (o.isMesh && o.geometry && o.material !== M.sky && !o.isSky) { const c = o.clone(); c.material = o.material.clone(); c.material.name = names.get(o.material) || 'mat'; c.position.copy(o.getWorldPosition(new THREE.Vector3())); root.add(c); } });
+  new GLTFExporter().parse(root, buf => { const b = new Uint8Array(buf); let bin = ''; for (let i = 0; i < b.length; i += 8192) bin += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); res(btoa(bin)); }, e => res('ERR' + e), { binary: true });
+});
 window.setT = setT; window.TOTAL = TOTAL; window.ready = true;
 setT(0);
